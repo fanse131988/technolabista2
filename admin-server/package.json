@@ -1,0 +1,14 @@
+{
+  "name": "technolab-ista-admin-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Serveur de contenu partagé (comptes multiples, journal, sauvegardes) pour la console d'administration TechnoLAB-ISTA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

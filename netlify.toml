@@ -1,0 +1,22 @@
+# Configuration Netlify — TechnoLAB-ISTA
+# Site = un seul fichier index.html, aucune compilation nécessaire.
+[build]
+  publish = "."
+  command = ""
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Console d'administration : /admin sert le site (qui ouvre la console) au lieu d'une 404.
+# (une seule règle suffit : elle couvre aussi /admin/)
+[[redirects]]
+  from = "/admin"
+  to = "/index.html"
+  status = 200
+
+# Le contenu est mis à jour depuis la console : pas de cache long sur la page
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    X-Content-Type-Options = "nosniff"

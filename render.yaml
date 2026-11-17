@@ -1,0 +1,23 @@
+# Déploiement Render (https://render.com) — serveur en ligne TechnoLAB-ISTA
+# 1. Pousser ce dépôt sur GitHub
+# 2. Render → New → Blueprint → choisir le dépôt : Render lit ce fichier
+# 3. Renseigner ADMIN_PASSWORD quand Render le demande
+services:
+  - type: web
+    name: technolab-ista-admin
+    runtime: node
+    rootDir: admin-server
+    plan: starter            # plan payant requis pour un disque persistant (≈ 7 $/mois)
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATA_DIR
+        value: /data
+      - key: NODE_VERSION
+        value: 20
+    disk:
+      name: technolab-data
+      mountPath: /data
+      sizeGB: 1
