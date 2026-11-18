@@ -1,0 +1,10 @@
+{
+  "_lisez_moi": "Remplacez url et anonKey par celles de votre projet Supabase (Project Settings > API), puis renommez ce fichier en supabase.json a cote de index.html. Ne mettez JAMAIS la cle service_role ici.",
+  "url": "",
+  "anonKey": "",
+  "table": "ista_content",
+  "histTable": "ista_history",
+  "bucket": "ista-media",
+  "realtime": true,
+  "mediaMode": "data"
+}

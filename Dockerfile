@@ -1,7 +1,10 @@
-# Image du serveur en ligne TechnoLAB-ISTA (Railway, Fly.io, VPS, Cloud Run…)
+# Image Docker du serveur TechnoLAB-ISTA (Railway, Fly.io, VPS, Cloud Run…)
+# Le contexte de construction est la RACINE du dépôt (pour inclure index.html).
 FROM node:20-alpine
 
 WORKDIR /app
+
+# Aucune dépendance externe : un seul fichier fait tourner le serveur.
 COPY admin-server/package.json ./package.json
 COPY admin-server/server.js ./server.js
 COPY index.html ./index.html
