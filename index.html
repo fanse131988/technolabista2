@@ -363,7 +363,13 @@
     .cms-sechead { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap;
       background: #f6f8fb; border-bottom: 1px solid #e2e8f0; padding: .55rem .8rem; font-size: 12px; color: #0f2a44; }
     .cms-secactions { display: flex; gap: .3rem; flex-wrap: wrap; }
-    .cms-secbody { padding: 1rem; max-height: 420px; overflow: auto; }
+    .cms-secbody { padding: 1rem; max-height: none; overflow: visible; }
+    /* aucun lien, bouton, lecteur ou champ de la page n'est actif dans l'aperçu */
+    .cms-secbody a, .cms-secbody button, .cms-secbody [onclick], .cms-secbody iframe,
+    .cms-secbody video, .cms-secbody audio, .cms-secbody form, .cms-secbody input,
+    .cms-secbody select, .cms-secbody textarea, .cms-secbody label,
+    .cms-secbody [data-ista-inert] { pointer-events: none !important; }
+    .cms-secbody .cms-editable { pointer-events: auto !important; position: relative; z-index: 1; }
     .cms-secbody .cms-editable { outline: 1px dashed rgba(218,157,60,.7); outline-offset: 2px; border-radius: 3px; cursor: text; }
     .cms-secbody .cms-editable.cms-ink-dark { color: #14263a !important; background: rgba(255,255,255,.9);
       box-shadow: 0 0 0 1px rgba(218,157,60,.55); border-radius: 3px; text-shadow: none !important; }
@@ -6689,6 +6695,17 @@
   function editorBody(html, pid, si) {
     var wrap = document.createElement('div');
     wrap.innerHTML = html || '';
+    // l'aperçu ne doit jamais déclencher les liens, boutons, lecteurs ou scripts de la page
+    [].forEach.call(wrap.querySelectorAll('*'), function (el) {
+      ['onclick', 'onkeydown', 'onkeyup', 'onchange', 'oninput', 'onsubmit', 'href', 'target', 'action', 'srcset'].forEach(function (a) {
+        if (el.hasAttribute(a) && a !== 'src') el.removeAttribute(a);
+      });
+      if (el.tagName === 'A') el.removeAttribute('href');
+      if (el.tagName === 'BUTTON') el.setAttribute('type', 'button');
+      if (el.tagName === 'IFRAME' || el.tagName === 'VIDEO' || el.tagName === 'AUDIO' || el.tagName === 'FORM') {
+        el.setAttribute('data-ista-inert', '1');
+      }
+    });
     var w = document.createTreeWalker(wrap, NodeFilter.SHOW_TEXT, null), n, pend = [];
     while ((n = w.nextNode())) {
       if (!n.nodeValue || !n.nodeValue.trim()) continue;
@@ -6952,6 +6969,76 @@
     A.toast(open ? 'Rubrique dépliée : tous les textes sont affichés' : 'Affichage normal rétabli');
   }
 
+  /* clic dans l'aperçu : on ne déclenche jamais l'action de la page, on place le
+     curseur dans le texte cliqué (ou le plus proche) pour pouvoir le corriger */
+  function nearestEditable(x, y, scope) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el !== scope && !el.classList.contains('cms-editable')) el = el.parentElement;
+    if (el && el.classList && el.classList.contains('cms-editable')) return el;
+    if (document.caretRangeFromPoint) {
+      var r = document.caretRangeFromPoint(x, y);
+      var n = r && r.startContainer;
+      while (n && n !== scope) {
+        if (n.nodeType === 3 && n.parentElement && n.parentElement.classList.contains('cms-editable')) return n.parentElement;
+        n = n.parentNode;
+      }
+    }
+    return null;
+  }
+
+  var previewBound = false;
+  function bindPreviewClicks() {
+    if (previewBound) return;
+    previewBound = true;
+    ['click', 'mousedown', 'auxclick', 'contextmenu', 'dblclick'].forEach(function (type) {
+      document.addEventListener(type, function (ev) {
+        var t = ev.target;
+        if (!t || !t.closest) return;
+        var vis = t.closest('.cms-secbody');
+        if (!vis) return;
+        var ed = nearestEditable(ev.clientX, ev.clientY, vis);
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (ed && type === 'mousedown') {
+          try { ed.focus(); } catch (e) {}
+          var sel = window.getSelection();
+          if (sel) { var rg = document.createRange(); rg.selectNodeContents(ed); sel.removeAllRanges(); sel.addRange(rg); }
+        }
+      }, true);
+    });
+    document.addEventListener('keydown', function (ev) {
+      var t = ev.target;
+      if (t && t.closest && t.closest('.cms-secbody') && !t.isContentEditable && (ev.key === 'Enter' || ev.key === ' ')) {
+        ev.preventDefault();
+        ev.stopPropagation();
+      }
+    }, true);
+  }
+
+  /* la console est reconstruite à chaque rendu : on applique les finitions à chaque fois */
+  function afterConsoleRender() {
+    mountPageBar();
+    [].forEach.call(document.querySelectorAll('.cms-secbody'), function (b) {
+      stopEffects(b);
+      fixPreviewContrast(b);
+    });
+    bindPreviewClicks();
+  }
+  function watchConsole() {
+    var root = document.getElementById('admin-root');
+    if (!root) { setTimeout(watchConsole, 300); return; }
+    if (root.dataset.istaWatched) return;
+    root.dataset.istaWatched = '1';
+    var t = null;
+    new MutationObserver(function () {
+      if (t) return;
+      t = setTimeout(function () { t = null; afterConsoleRender(); }, 60);
+    }).observe(root, { childList: true, subtree: true });
+    afterConsoleRender();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchConsole);
+  else watchConsole();
+
   /* ------------------------------------------------------------- actions UI */
   function toggleSection_impl(pid, si) {
     var s = A.state.site[pid].sections[si];
@@ -7158,6 +7245,7 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindLiveEdit);
   else bindLiveEdit();
 
+
   var EXPORTS = {
     pickPage: function (pid) { A.collectSections(); A.activePage = pid; A.renderAdmin(); },
     goSite: function (pid) { A.goSite(pid); },
@@ -7184,10 +7272,7 @@
         var _renderAdmin = A.renderAdmin;
         A.renderAdmin = function () {
           var out = _renderAdmin.apply(null, arguments);
-          setTimeout(function () {
-            mountPageBar();
-            [].forEach.call(document.querySelectorAll('.cms-secbody'), function (b) { stopEffects(b); fixPreviewContrast(b); });
-          }, 0);
+          setTimeout(afterConsoleRender, 0);
           return out;
         };
       }
