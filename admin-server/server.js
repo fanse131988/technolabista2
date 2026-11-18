@@ -20,6 +20,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const PORT = process.env.PORT || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -122,6 +123,55 @@ const body = (req) => new Promise((resolve, reject) => {
   req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch (e) { reject(e); } });
   req.on('error', reject);
 });
+
+/* ------------------------------------------------- envoi compressé du site (HTML) */
+let _gzCache = { key: '', buf: null };
+const gzipFile = (file, st, cb) => {
+  const key = file + '|' + st.mtimeMs + '|' + st.size;
+  if (_gzCache.key === key && _gzCache.buf) return cb(null, _gzCache.buf);
+  fs.readFile(file, (e, data) => {
+    if (e) return cb(e);
+    zlib.gzip(data, { level: 6 }, (e2, out) => {
+      if (e2) return cb(e2);
+      _gzCache = { key, buf: out };
+      cb(null, out);
+    });
+  });
+};
+const sendSite = (req, res, file) => {
+  let st;
+  try { st = fs.statSync(file); } catch (e) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Site introuvable.');
+  }
+  const wantsGzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
+  const etag = '"' + st.size.toString(16) + '-' + Math.round(st.mtimeMs).toString(36) + (wantsGzip ? '-gz' : '') + '"';
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(304, { ETag: etag, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' });
+    return res.end();
+  }
+  const base = {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    ETag: etag,
+    Vary: 'Accept-Encoding',
+    'X-Content-Type-Options': 'nosniff'
+  };
+  const plain = () => {
+    res.writeHead(200, Object.assign({ 'Content-Length': st.size }, base));
+    if (req.method === 'HEAD') return res.end();
+    const rs = fs.createReadStream(file);
+    rs.on('error', () => { try { res.destroy(); } catch (e) {} });
+    rs.pipe(res);
+  };
+  if (!wantsGzip) return plain();
+  gzipFile(file, st, (e, buf) => {
+    if (e || !buf) return plain();
+    res.writeHead(200, Object.assign({ 'Content-Encoding': 'gzip', 'Content-Length': buf.length }, base));
+    if (req.method === 'HEAD') return res.end();
+    res.end(buf);
+  });
+};
 
 /* ------------------------------------------------------------------------ API */
 const server = http.createServer(async (req, res) => {
@@ -244,17 +294,21 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // --- site (le plus récent fichier HTML présent dans le dossier)
-  if (req.method === 'GET' && (p === '/' || p.endsWith('.html'))) {
-    const candidates = [SITE_FILE, path.join(ROOT, 'index.html'),
-      path.join(ROOT, '..', 'index.html'), path.join(ROOT, 'public', 'index.html')];
-    const file = candidates.find((f) => { try { return fs.statSync(f).isFile(); } catch (e) { return false; } });
-    if (!file) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      return res.end('Site introuvable : placez index.html à côté du dossier admin-server, ou définissez SITE_FILE.');
+  /* --------------------------------------------------- envoi du fichier du site
+     index.html pèse 7,4 Mo : sans compression chaque visite consomme ~7 Mo du
+     quota de bande passante de la plateforme (5 Go/mois chez Render = ~700 visites).
+     On sert donc une version gzip (≈ 5,3 Mo) mémorisée, avec ETag et 304. */
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    if (p === '/' || p.endsWith('.html')) {
+      const candidates = [SITE_FILE, path.join(ROOT, 'index.html'),
+        path.join(ROOT, '..', 'index.html'), path.join(ROOT, 'public', 'index.html')];
+      const file = candidates.find((f) => { try { return fs.statSync(f).isFile(); } catch (e) { return false; } });
+      if (!file) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('Site introuvable : placez index.html à côté du dossier admin-server, ou définissez SITE_FILE.');
+      }
+      return sendSite(req, res, file);
     }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
-    return fs.createReadStream(file).pipe(res);
   }
 
   json(res, 404, { error: 'Route inconnue.' });

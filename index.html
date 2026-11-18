@@ -7129,7 +7129,11 @@
     box.id = 'cms-publish-box';
     box.className = 'cms-block';
     box.innerHTML = '<h3>Publier pour tous les visiteurs</h3>' +
-      '<p class="cms-muted">Sur un hébergement sans serveur (Netlify, GitHub Pages), le contenu publié est le fichier <code>content.json</code> placé à côté de <code>index.html</code>.</p>' +
+      '<p class="cms-state" style="font-size:11.5px;color:#0f2a44;background:#eef2f8;border:1px solid #d7e0ea;border-radius:8px;padding:.45rem .6rem;margin:.2rem 0 .6rem">' +
+      esc(A.publishStatus ? A.publishStatus() : '') + '</p>' +
+      '<p class="cms-muted">' + (A.online()
+        ? 'Le serveur est connecté : « Enregistrer &amp; appliquer » publie pour tous. Ce bouton sert de secours (fichier à déposer sur l\'hébergement).'
+        : 'Aucun serveur connecté : vos modifications restent sur cet appareil tant que <code>content.json</code> n\'est pas déposé à côté de <code>index.html</code>.') + '</p>' +
       '<ol class="cms-hint" style="margin:.4rem 0 .6rem 1.1rem;line-height:1.7">' +
       '<li><strong>Publier pour tous</strong> télécharge <code>content.json</code> avec vos modifications.</li>' +
       '<li>Sur GitHub : <em>Add file → Upload files</em>, déposez ce fichier à la racine (à côté de index.html), puis <em>Commit changes</em>.</li>' +
@@ -7371,7 +7375,329 @@
   else bindLiveEdit();
 
 
+
+  /* ===== TASK 25 : fiabilité des mises à jour ===== */
+  /* Trois causes rendaient les mises à jour invisibles pour une partie des
+     visiteurs (autres navigateurs, smartphones) :
+       • la rubrique « À la une » est ré-écrite en innerHTML par l'éditeur : les
+         textes gérés par l'onglet « Accueil & pop-up » disparaissaient ;
+       • un contenu publié plus ancien pouvait ne plus contenir certaines rubriques ;
+       • un visiteur déjà venu (localStorage rempli) n'appliquait une nouvelle
+         publication que si son numéro de version strictement supérieur — or les
+         publications successives réutilisaient le même numéro.
+     Les fonctions ci-dessous lèvent ces trois blocages et rendent l'enregistrement
+     explicite (« publié » ou « seulement sur cet appareil »). */
+
+  function annonceEl(id) { return document.getElementById(id); }
+
+  /* ré-applique les textes de « À la une » (annonce, pop-up d'information, encadré
+     réservé) — appelé après tout rendu, y compris après ré-écriture des rubriques */
+  A.renderAnnonce = function () {
+    var st = A.state || {}, a = st.annonce || {};
+    var badge = annonceEl('ista-cms-annonce-badge');
+    var card = badge && badge.closest ? badge.closest('article') : null;
+    if (card) card.style.display = (a.active === false) ? 'none' : '';
+    var set = function (id, v) {
+      var e = annonceEl(id);
+      if (e && v !== undefined && v !== null && String(v) !== '') e.textContent = v;
+    };
+    set('ista-cms-annonce-badge', a.badge);
+    set('ista-cms-annonce-title', a.title);
+    set('ista-cms-annonce-text', a.text);
+    set('ista-cms-deadline', a.deadline);
+    if (a.points && a.points.length) {
+      var ul = annonceEl('ista-cms-annonce-points');
+      if (ul) {
+        ul.innerHTML = a.points.map(function (p) {
+          if (p == null) return '';
+          if (typeof p === 'string') return '<li>\u2022 ' + esc(p) + '</li>';
+          return '<li>\u2022 <strong>' + esc(p.label || '') + '</strong> ' + esc(p.value || '') + '</li>';
+        }).join('');
+      }
+    }
+    var pi = st.popinfo || {};
+    set('ista-cms-popinfo-label', pi.label);
+    set('ista-cms-popinfo-title', pi.title);
+    set('ista-cms-popinfo-text', pi.text);
+    var rs = st.reserved || {};
+    set('ista-cms-reserved-title', rs.title);
+    set('ista-cms-reserved-text', rs.text);
+    return true;
+  };
+
+  /* le rendu du site ré-écrit les rubriques : l'annonce doit être rejouée après */
+  if (typeof A.render === 'function') {
+    var _renderAnnonce = A.render;
+    A.render = function () {
+      var out = _renderAnnonce.apply(null, arguments);
+      try { A.renderAnnonce(); } catch (e) {}
+      return out;
+    };
+  }
+
+  /* ---- toute rubrique d'origine absente d'un contenu reçu est réinsérée :
+     un contenu publié ancien ne peut plus faire disparaître « À la une » */
+  A.mergeSeedSections = function (expanded) {
+    if (!expanded) return expanded;
+    var seed = A.seedSite || {};
+    Object.keys(seed).forEach(function (pid) {
+      var s0 = (seed[pid] || {}).sections || [];
+      if (!s0.length) return;
+      var d = expanded[pid];
+      if (!d || !d.sections || !d.sections.length) {
+        expanded[pid] = JSON.parse(JSON.stringify(seed[pid]));
+        return;
+      }
+      var have = {};
+      d.sections.forEach(function (x) { if (x && x.id) have[x.id] = 1; });
+      s0.forEach(function (base, i) {
+        if (!base || have[base.id]) return;
+        var pos = Math.min(i, d.sections.length);
+        d.sections.splice(pos, 0, JSON.parse(JSON.stringify(base)));
+      });
+    });
+    return expanded;
+  };
+
+  if (typeof A.expandSite === 'function') {
+    var _expand25 = A.expandSite;
+    A.expandSite = function () {
+      var out = _expand25.apply(null, arguments);
+      try { A.mergeSeedSections(out); } catch (e) {}
+      return out;
+    };
+  }
+
+  /* ---- l'onglet « Accueil & pop-up » et la rubrique « À la une » décrivent les
+     mêmes textes : on les synchronise dans le sens du dernier changement. */
+  var MIRROR = [
+    ['annonce', 'badge', 'ista-cms-annonce-badge'],
+    ['annonce', 'title', 'ista-cms-annonce-title'],
+    ['annonce', 'text', 'ista-cms-annonce-text'],
+    ['popinfo', 'label', 'ista-cms-popinfo-label'],
+    ['popinfo', 'title', 'ista-cms-popinfo-title'],
+    ['popinfo', 'text', 'ista-cms-popinfo-text'],
+    ['reserved', 'title', 'ista-cms-reserved-title'],
+    ['reserved', 'text', 'ista-cms-reserved-text']
+  ];
+
+  A.snapshotAnnonce = function () {
+    var o = {};
+    ['annonce', 'popinfo', 'reserved'].forEach(function (k) {
+      try { o[k] = JSON.parse(JSON.stringify((A.state || {})[k] || {})); } catch (e) { o[k] = {}; }
+    });
+    return o;
+  };
+
+  A.unifyAnnonce = function (before) {
+    var acc = (A.state.site || {}).accueil;
+    if (!acc || !acc.sections || !acc.sections.length) return false;
+    var target = null;
+    acc.sections.forEach(function (sec) {
+      if (!target && /ista-cms-annonce-title/.test(String(sec.html || ''))) target = sec;
+    });
+    if (!target) return false;
+    var d = document.createElement('div');
+    d.innerHTML = target.html || '';
+    MIRROR.forEach(function (m) {
+      var key = m[0], field = m[1], id = m[2];
+      var e = d.querySelector('#' + id);
+      var box = A.state[key] || (A.state[key] = {});
+      var prev = (before && before[key]) ? before[key][field] : undefined;
+      var now = box[field];
+      var typed = before && String(prev == null ? '' : prev) !== String(now == null ? '' : now);
+      if (typed && now != null && String(now) !== '') {
+        if (e) e.textContent = now;                       // le champ de l'onglet gagne
+      } else if (e) {
+        box[field] = e.textContent.replace(/\s+/g, ' ').trim();  // la rubrique gagne
+      }
+    });
+    var ul = d.querySelector('#ista-cms-annonce-points');
+    if (ul) {
+      var a = A.state.annonce || (A.state.annonce = {});
+      var prevPts = before && before.annonce ? JSON.stringify(before.annonce.points || []) : '';
+      var typedPts = prevPts !== JSON.stringify(a.points || []);
+      if (typedPts && a.points && a.points.length) {
+        ul.innerHTML = a.points.map(function (p) {
+          if (p == null) return '';
+          if (typeof p === 'string') return '<li>\u2022 ' + esc(p) + '</li>';
+          return '<li>\u2022 <strong>' + esc(p.label || '') + '</strong> ' + esc(p.value || '') + '</li>';
+        }).join('');
+      } else {
+        var list = [].map.call(ul.querySelectorAll('li'), function (li) {
+          var strong = li.querySelector('strong');
+          var label = strong ? strong.textContent.trim().replace(/\s*:\s*$/, '') : '';
+          var value = li.textContent.replace(strong ? strong.textContent : '', '').replace(/^[\s\u2022]*/, '').trim();
+          return { label: label, value: value };
+        });
+        if (list.length) a.points = list;
+      }
+    }
+    target.html = d.innerHTML;
+    return true;
+  };
+
+  /* ------------------------------------------------- enregistrement explicite
+     « Enregistrer & appliquer » collecte toujours l'état avant d'écrire, annonce
+     exactement ce qui s'est passé, et mémorise la version publiée. */
+  A.saveAll = function () {
+    var snap = A.snapshotAnnonce();
+    try { if (window.IstaAdminUI && IstaAdminUI.collect) IstaAdminUI.collect(); } catch (e) {}
+    try { A.unifyAnnonce(snap); } catch (e) {}
+    A.persistLocal();
+    try { A.render(A.state); } catch (e) {}
+    A.log((A.currentUser() || {}).login, 'Enregistrement du contenu');
+    var finish = function (msg, kind) {
+      A.toast(msg, kind || 'ok');
+      try { A.renderAdmin(); } catch (e) {}
+      try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) {}
+      return { ok: kind !== 'err', msg: msg };
+    };
+    if (!A.online()) {
+      return Promise.resolve(finish('Enregistré sur cet appareil. Pour publier pour tous : onglet Maintenance → « Publier pour tous (content.json) »'));
+    }
+    return A.pushToServer().then(function (r) {
+      return A.pushSite().then(function (rs) {
+        var ok = !!(r && r.ok && rs && rs.ok);
+        return finish(ok
+          ? 'Enregistré et publié sur le serveur — visible par tous les visiteurs'
+          : 'Enregistré sur cet appareil — publication serveur incomplète : ' + (r && r.ok ? rs && rs.msg : r && r.msg),
+          ok ? 'ok' : 'err');
+      });
+    }).catch(function (e) {
+      return finish('Enregistré sur cet appareil — serveur injoignable (' + (e && e.message) + ')', 'err');
+    });
+  };
+
+  /* le serveur renvoie le numéro de version publié : on le conserve */
+  if (typeof A.pushToServer === 'function') {
+    A.pushToServer = function () {
+      if (!A.online()) return Promise.resolve({ ok: false, msg: 'Aucun serveur configuré.' });
+      return A.apiFetch('/api/content', { method: 'PUT', body: A.state })
+        .then(function (j) {
+          if (j && j.version) {
+            A.state.version = j.version;
+            A.state.publishedAt = j.updatedAt || new Date().toISOString();
+            try { A.persistLocal(); } catch (e) {}
+          }
+          return { ok: true, msg: 'Contenu publié sur le serveur partagé.' };
+        })
+        .catch(function (e) { return { ok: false, msg: 'Échec de publication : ' + e.message }; });
+    };
+  }
+
+  /* « Annuler mes changements » recharge le contenu PUBLIÉ (et non le vide) */
+  A.discardEdits = function () {
+    try { A.load(); } catch (e) {}
+    try { A.render(A.state); } catch (e) {}
+    try { A.renderAdmin(); } catch (e) {}
+    return A.loadPublished(true).then(function (r) {
+      try { A.render(A.state); } catch (e) {}
+      try { A.renderAdmin(); } catch (e) {}
+      A.toast('Modifications annulées' + (r && r.ok ? ' — contenu publié rechargé' : ''), 'ok');
+      return r;
+    });
+  };
+
+  /* ------------------------------------------------------ contenu publié (v2)
+     Comparaison version + horodatage : un visiteur déjà venu applique la nouvelle
+     publication même si le numéro de version n'a pas bougé. */
+  A.loadPublished = function (force) {
+    var localPack = function () {
+      try { return JSON.parse(LS.getItem('ista-cms-data') || '{}') || {}; } catch (e) { return {}; }
+    };
+    var apply = function (j, src) {
+      var lc = localPack();
+      var jv = j.version || 1;
+      var lv = lc.version || 0;
+      var same = (jv <= lv) && String(j.publishedAt || '') === String(lc.publishedAt || '');
+      if (same && !force) return { ok: false, msg: 'Contenu publié déjà à jour (v' + lv + ')' };
+      A.state = A.mergeDeep(A.seed(), j);
+      A.state.media = j.media || A.state.media || {};
+      A.state.version = jv;
+      A.state.publishedAt = j.publishedAt || '';
+      A.staticVersion = Math.max(A.staticVersion || 0, jv);
+      try { A.absorbPulled(); } catch (e) {}
+      try { A.render(A.state); } catch (e) {}
+      try { A.renderAnnonce(); } catch (e) {}
+      try { A.persistLocal(); } catch (e) {}
+      return { ok: true, msg: (src === 'api' ? 'Contenu du serveur appliqué' : 'Contenu publié appliqué') + ' (v' + jv + ')' };
+    };
+    var tryStatic = function () {
+      return window.fetch(A.staticContentURL + '?v=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || (!j.site && !j.pages)) return { ok: false, msg: 'Aucun contenu publié (content.json absent).' };
+          return apply(j, 'file');
+        })
+        .catch(function () { return { ok: false, msg: 'Aucun contenu publié accessible.' }; });
+    };
+    if (A.online()) {
+      return A.pullFromServer().then(function (r) {
+        if (r && r.ok) {
+          try { A.absorbPulled(); } catch (e) {}
+          try { A.renderAnnonce(); } catch (e) {}
+          try { A.persistLocal(); } catch (e) {}
+          return { ok: true, msg: 'Contenu du serveur appliqué' };
+        }
+        return tryStatic();
+      }).catch(function () { return tryStatic(); });
+    }
+    return tryStatic();
+  };
+
+  /* ---------------------------------------- publication du fichier content.json
+     Le numéro de version est calculé au-dessus de tout ce qui existe (mémoire du
+     navigateur, version publiée) : chaque publication est donc nouvelle pour tous. */
+  A.publishFile = function () {
+    var snap = A.snapshotAnnonce();
+    try { if (window.IstaAdminUI && IstaAdminUI.collect) IstaAdminUI.collect(); } catch (e) {}
+    try { A.unifyAnnonce(snap); } catch (e) {}
+    A.persistLocal();
+    var payload;
+    try { payload = A.buildSitePayload(); } catch (e) { payload = { site: A.state.site, media: {} }; }
+    var copy = {}, st = A.state;
+    Object.keys(st).forEach(function (k) {
+      if (k === 'site' || k === 'media' || k === 'saved') return;
+      copy[k] = st[k];
+    });
+    copy.site = payload.site;
+    copy.media = payload.media;
+    var lv = 0;
+    try { lv = (JSON.parse(LS.getItem('ista-cms-data') || '{}').version || 0); } catch (e) { lv = 0; }
+    copy.version = Math.max(A.staticVersion || 0, lv, st.version || 0) + 1;
+    copy.publishedAt = new Date().toISOString();
+    copy.publishedBy = (A.currentUser() || {}).login || 'admin';
+    A.staticVersion = copy.version;
+    st.version = copy.version;
+    st.publishedAt = copy.publishedAt;
+    try { A.persistLocal(); } catch (e) {}
+    var blob = new Blob([JSON.stringify(copy)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'content.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    A.log((A.currentUser() || {}).login, 'Publication pour tous les visiteurs (content.json v' + copy.version + ')');
+    A.toast('content.json v' + copy.version + ' téléchargé — déposez-le à côté de index.html');
+    return copy;
+  };
+
+  /* état de publication visible dans l'onglet Maintenance */
+  A.publishStatus = function () {
+    var pub = '';
+    try { pub = new Date(A.state.publishedAt || '').toLocaleString('fr-FR'); } catch (e) { pub = ''; }
+    var lv = 0;
+    try { lv = (JSON.parse(LS.getItem('ista-cms-data') || '{}').version || 0); } catch (e) { lv = 0; }
+    return 'Version publiée : v' + (Math.max(A.staticVersion || 0, lv) || '—') +
+      (pub ? ' · ' + pub : '') + ' · serveur : ' + (A.online() ? A.apiBase() : 'aucun (fichier content.json)');
+  };
+
   var EXPORTS = {
+    save: function () { return A.saveAll(); },
+    reload: function () { return A.discardEdits(); },
+    publishStatus: function () { return A.publishStatus(); },
     pickPage: function (pid) { A.collectSections(); A.activePage = pid; A.renderAdmin(); },
     publishFile: function () { A.publishFile(); },
     loadPublished: function () {
