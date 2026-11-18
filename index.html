@@ -315,9 +315,35 @@
     }
 
     /* ===== Éditeur complet de rubriques (Task 14) ===== */
+    .cms-pagebar { display: flex; align-items: center; gap: .3rem; flex-wrap: wrap; background: #0b2033;
+      border-top: 1px solid rgba(255,255,255,.08); padding: .45rem 1rem;
+      position: sticky; top: 0; z-index: 99998; box-shadow: 0 6px 16px -12px rgba(0,0,0,.6); }
+    #admin-root:not(.hidden) { position: relative; z-index: 99990; }
+    .cms-return { position: fixed; right: 1rem; bottom: 5.2rem; z-index: 99999; align-items: center; gap: .35rem;
+      background: #0f2a44; color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 999px;
+      padding: .55rem 1rem; font-size: 12px; font-weight: 700; box-shadow: 0 12px 28px -12px rgba(0,0,0,.6);
+      cursor: pointer; display: inline-flex; }
+    .cms-return:hover { background: #da9d3c; color: #0f2a44; border-color: #da9d3c; }
+    .cms-pagebar-label { font-size: 10px; text-transform: uppercase; letter-spacing: .14em; color: rgba(255,255,255,.45); margin-right: .35rem; }
+    .cms-pagebar-btn { font-size: 11px; font-weight: 600; color: #dbe6f1; background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: .28rem .7rem; cursor: pointer; transition: all .18s; }
+    .cms-pagebar-btn:hover { background: #da9d3c; border-color: #da9d3c; color: #0f2a44; }
+    .cms-pagebar-home { margin-left: auto; background: #da9d3c; border-color: #da9d3c; color: #0f2a44; }
+    .cms-foot { justify-content: flex-start; }
+    .cms-foot-btns { display: flex; gap: .5rem; margin-right: auto; }
+    .cms-foot-state { margin-left: auto; text-align: right; }
     .cms-pagepicker { gap: .35rem; }
     .cms-pagepicker .cms-btn { text-transform: none; }
-    .cms-main .cms-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 1rem; overflow: hidden; }
+    /* l'aperçu d'une rubrique est isolé : ses calques absolus/fixes (filtres, dégradés,
+       bannières) restent confinés dans leur cadre et ne peuvent pas recouvrir les
+       onglets, la barre de pages ni le pied de la console */
+    .cms-main .cms-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 1rem;
+      overflow: hidden; position: relative; z-index: 0; isolation: isolate; }
+    .cms-secbody { position: relative; z-index: 0; isolation: isolate; transform: translateZ(0); contain: paint; }
+    .cms-secbody .cms-visual, .cms-secbody > * { max-width: 100%; }
+    .cms-secbody [style*="fixed"], .cms-secbody .fixed, .cms-secbody .sticky { position: absolute !important; }
+    .cms-head, .cms-tabs { position: relative; z-index: 5; }
+    .cms-foot { z-index: 6; }
     .cms-sechead { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap;
       background: #f6f8fb; border-bottom: 1px solid #e2e8f0; padding: .55rem .8rem; font-size: 12px; color: #0f2a44; }
     .cms-secactions { display: flex; gap: .3rem; flex-wrap: wrap; }
@@ -5775,15 +5801,16 @@
       '<header class="cms-top"><div class="cms-brand"><span class="cms-logo">T</span><div><strong>TechnoLAB-ISTA</strong><small>Console d’administration</small></div></div>' +
       '<div class="cms-who"><span class="cms-pill is-admin">Administrateur</span>' +
       '<span class="cms-user">' + A.esc(u.name) + '</span>' +
-      '<button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.openSite()">Voir le site</button>' +
+      '<button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.goSite()">Voir le site</button>' +
       '<button class="cms-btn cms-btn-sm cms-btn-danger" onclick="IstaAdminUI.logout()">Quitter</button></div></header>' +
       '<nav class="cms-tabs">' + tabs.map(function (t) {
         return '<button class="' + (t.id === A.activeTab ? 'is-on' : '') + '" onclick="IstaAdminUI.tab(\'' + t.id + '\')">' + t.label + '</button>';
       }).join('') + '</nav>' +
       '<main class="cms-main">' + (tabs.filter(function (t) { return t.id === A.activeTab; })[0] || tabs[0]).fn() + '</main>' +
-      '<footer class="cms-foot"><span>' + (A.online() ? '🌐 Serveur en ligne' : '💾 Enregistrement local') + ' — ' + A.esc(new Date(A.state.updatedAt || Date.now()).toLocaleString('fr-FR')) + '</span>' +
-      '<div><button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.reload()">Annuler mes changements</button>' +
-      '<button class="cms-btn cms-btn-primary" onclick="IstaAdminUI.save()">Enregistrer &amp; appliquer</button></div></footer>' +
+      '<footer class="cms-foot"><div class="cms-foot-btns"><button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.reload()">Annuler mes changements</button>' +
+      '<button class="cms-btn cms-btn-primary" onclick="IstaAdminUI.save()">Enregistrer &amp; appliquer</button></div>' +
+      '<span class="cms-foot-state">' + (A.online() ? '🌐 Serveur en ligne' : '💾 Enregistrement local') + ' — ' + A.esc(new Date(A.state.updatedAt || Date.now()).toLocaleString('fr-FR')) + '</span>' +
+      '</span></footer>' +
       '</div>';
     root.innerHTML = html;
   };
@@ -6211,6 +6238,69 @@
     };
   }
 
+  /* ------------------------------------------------- accès permanent aux pages
+     La barre « Pages du site » est ancrée en haut de la console (au-dessus de tout
+     contenu de page) : elle reste cliquable même quand la page affichée possède ses
+     propres calques fixes (filtres, panneaux, bannières). Un bouton flottant
+     « Console » est en plus affiché sur le site pour revenir à l'administration. */
+  function mountPageBar() {
+    var root = document.getElementById('admin-root');
+    if (!root || root.classList.contains('hidden')) return;
+    var shell = root.querySelector('.cms-shell') || root;
+    var bar = document.getElementById('cms-pagebar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'cms-pagebar';
+      bar.className = 'cms-pagebar';
+      var html = '<span class="cms-pagebar-label">Pages du site</span>';
+      A.PAGES.forEach(function (pid) {
+        html += '<button class="cms-pagebar-btn" onclick="IstaAdminUI.goPage(\'' + pid + '\')">' + esc(A.PAGE_LABELS[pid] || pid) + '</button>';
+      });
+      html += '<button class="cms-pagebar-btn cms-pagebar-home" onclick="IstaAdminUI.goSite()">Accueil du site ↗</button>';
+      bar.innerHTML = html;
+      shell.insertBefore(bar, shell.firstChild);
+    }
+    if (!bar.dataset.ready) {
+      bar.dataset.ready = '1';
+      // le clic est capté même si un élément de la page passe au-dessus
+      bar.addEventListener('mousedown', function (ev) {
+        var b = ev.target.closest('button');
+        if (!b) return;
+        ev.stopPropagation();
+        b.setAttribute('data-pressed', '1');
+      }, true);
+      bar.addEventListener('click', function (ev) {
+        var b = ev.target.closest('button');
+        if (!b) return;
+        ev.stopPropagation();
+        var oc = b.getAttribute('onclick') || '';
+        var m = /goPage\('([^']+)'\)/.exec(oc);
+        if (m) A.goSite(m[1]);
+        else if (/goSite\(\)/.test(oc)) A.goSite();
+      }, true);
+    }
+    // bouton flottant de retour à la console (visible sur le site uniquement)
+    var ret = document.getElementById('cms-return');
+    if (!ret) {
+      ret = document.createElement('button');
+      ret.id = 'cms-return';
+      ret.className = 'cms-return';
+      ret.innerHTML = '⚙ Console';
+      ret.addEventListener('click', function () {
+        if (location.hash === '#admin') A.route();
+        else location.hash = 'admin';
+      });
+      document.body.appendChild(ret);
+    }
+    ret.style.display = document.body.classList.contains('cms-mode') ? 'none' : 'inline-flex';
+  }
+
+  function syncReturnButton() {
+    var ret = document.getElementById('cms-return');
+    if (!ret) return;
+    ret.style.display = document.body.classList.contains('cms-mode') ? 'none' : 'inline-flex';
+  }
+
   /* ---------------------------------------------- stockage compact (images seules)
      Le texte complet du site pèse ~220 Ko : on le conserve tel quel. Seules les
      images (4 Mo de data:) sont remplacées par des références :
@@ -6455,6 +6545,74 @@
     };
   }
 
+  /* ------------------------------------------------- sortie de la console
+     « Voir le site » masquait la console par un rechargement complet de la page :
+     le hash #admin étant encore présent, le routeur ré-affichait la console et on
+     restait bloqué. On applique maintenant la route SANS recharger. */
+  if (typeof A.route === 'function') {
+    var _route = A.route;
+    A.route = function () {
+      var wasAdmin = document.body.classList.contains('cms-mode');
+      var out = _route.apply(null, arguments);
+      var isAdmin = document.body.classList.contains('cms-mode');
+      if (isAdmin) {
+        hidePublicShell();
+        setTimeout(mountPageBar, 0);
+      } else {
+        showPublicShell();
+        if (wasAdmin) {
+          try { window.scrollTo(0, 0); } catch (e) {}
+          try { if (typeof window.switchPage === 'function') window.switchPage(A.lastPublicPage || 'accueil'); } catch (e) {}
+        }
+      }
+      syncReturnButton();
+      return out;
+    };
+  }
+
+  /* le site est réellement masqué pendant l'administration (aucun calque ne gêne) */
+  function hidePublicShell() {
+    ['header', 'footer', '#mobile-drawer'].forEach(function (sel) {
+      var el = document.querySelector(sel);
+      if (el) el.style.display = 'none';
+    });
+    [].forEach.call(document.querySelectorAll('body > main'), function (el) { el.style.display = 'none'; });
+  }
+
+  /* une page publique doit rester affichée après la sortie de la console */
+  A.lastPublicPage = 'accueil';
+  function showPublicShell() {
+    var page = A.lastPublicPage || 'accueil';
+    var views = document.querySelectorAll('.page-view');
+    var any = false;
+    [].forEach.call(views, function (v) {
+      if (v.id === 'page-' + page) { v.classList.remove('hidden'); any = true; }
+      else v.classList.add('hidden');
+    });
+    if (!any && views.length) views[0].classList.remove('hidden');
+    var h = document.querySelector('header'), m = document.querySelector('body > main'), f = document.querySelector('footer');
+    [h, m, f].forEach(function (el) { if (el) el.style.display = ''; });
+  }
+
+  /* quitter la console vers le site public (sans perdre l'état ni recharger) */
+  A.goSite = function (pageId) {
+    if (pageId) A.lastPublicPage = pageId;
+    try { A.collectSections(); } catch (e) {}
+    try { A.render(A.state); } catch (e) {}
+    if (location.hash) {
+      try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { location.hash = ''; }
+    }
+    document.body.classList.remove('cms-mode');
+    var root = document.getElementById('admin-root');
+    if (root) { root.classList.add('hidden'); root.style.display = 'none'; }
+    showPublicShell();
+    try { A.route(); } catch (e) {}
+    try { if (typeof window.switchPage === 'function') window.switchPage(A.lastPublicPage); } catch (e) {}
+    try { window.scrollTo(0, 0); } catch (e) {}
+    syncReturnButton();
+    A.toast('Retour au site — bouton « ⚙ Console » pour revenir');
+  };
+
   /* ------------------------------------------------------- aperçu éditable */
   function editorBody(html, pid, si) {
     var wrap = document.createElement('div');
@@ -6585,31 +6743,130 @@
       (log || '<tr><td colspan="3">Aucune activité enregistrée.</td></tr>') + '</tbody></table></div>';
   };
 
-  /* vidéo lue depuis un lien : l'identifiant suffit au lecteur (YouTube/Vimeo) */
-  function videoLink(v) {
-    var url = String((v || {}).url || '').trim();
-    if (!url) return String((v || {}).videoId || '');
-    var id = ytId(url);
-    if (!id) return url;
-    if (id.indexOf('vimeo:') === 0) {
-      return 'https://player.vimeo.com/video/' + id.slice(6) + '?autoplay=1';
+  /* --------------------------------------------------- lecteur vidéo par lien
+     openVideoModal n'accepte que les deux identifiants connus du site et retombe
+     sinon sur la vidéo « Palme » : une vidéo ajoutée par lien ouvrait donc toujours
+     l'ancienne vidéo. On accepte maintenant :
+       • un identifiant YouTube (11 caractères)          → lecteur YouTube
+       • un lien youtube.com / youtu.be                  → identifiant extrait
+       • un lien vimeo.com                               → lecteur Vimeo
+       • un lien direct (.mp4, .webm…)                   → lecteur natif
+       • les raccourcis du site (« palme », « remise »…) → identifiants connus */
+  var VIDEO_ALIAS = { palme: 'jVo76IbIFec', remise: 'jVo76IbIFec', hymne: 'EBR_WcMNStc', campus: 'EBR_WcMNStc' };
+  var VIDEO_TITLES = {};
+
+  A.videoSrc = function (raw) {
+    var s = String(raw || '').trim();
+    if (!s) return null;
+    var low = s.toLowerCase();
+    if (VIDEO_ALIAS[low]) s = VIDEO_ALIAS[low];
+    // lien direct vers un fichier vidéo
+    if (/^https?:\/\/\S+\.(mp4|webm|ogg|m3u8)(\?\S*)?$/i.test(s)) return { kind: 'file', src: s };
+    // Vimeo
+    var vm = s.match(/vimeo\.com\/(?:video\/)?(\d+)/);
+    if (vm) return { kind: 'vimeo', src: 'https://player.vimeo.com/video/' + vm[1] + '?autoplay=1' };
+    if (/^vimeo:\d+$/.test(low)) return { kind: 'vimeo', src: 'https://player.vimeo.com/video/' + low.split(':')[1] + '?autoplay=1' };
+    // YouTube (identifiant seul, lien complet, embed, shorts, youtu.be)
+    var yt = ytId(s);
+    if (yt && yt.indexOf('vimeo:') !== 0) {
+      return { kind: 'youtube', src: 'https://www.youtube-nocookie.com/embed/' + yt + '?autoplay=1&rel=0&modestbranding=1' };
     }
-    return 'https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0';
+    // dernier recours : page web quelconque
+    if (/^https?:\/\//.test(s)) return { kind: 'link', src: s };
+    return null;
+  };
+
+  /* le lecteur du site est remplacé par une version qui reconnaît tous les liens */
+  A.installVideoModal = function () {
+    var legacy = window.openVideoModal;
+    window.openVideoModal = function (raw) {
+      var v = A.videoSrc(raw);
+      if (!v) { if (typeof legacy === 'function') return legacy.apply(null, arguments); return; }
+      var titre = VIDEO_TITLES[String(raw)] || A.whichVideo(raw) || 'Vidéos TechnoLAB-ISTA';
+      var badge = document.getElementById('info-modal-badge');
+      var title = document.getElementById('info-modal-title');
+      var body = document.getElementById('info-modal-body');
+      var modal = document.getElementById('info-modal');
+      if (!body || !modal) { if (typeof legacy === 'function') return legacy.apply(null, arguments); return; }
+      if (badge) badge.textContent = 'TechnoLAB-ISTA TV • Lecteur vidéo';
+      if (title) title.textContent = titre;
+      var player;
+      if (v.kind === 'file') {
+        player = '<video class="absolute inset-0 w-full h-full" src="' + esc(v.src) + '" controls autoplay playsinline></video>';
+      } else if (v.kind === 'link') {
+        player = '<div class="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">' +
+          '<p class="text-white/80 text-sm">Cette vidéo ne peut pas être lue dans le site.</p>' +
+          '<a href="' + esc(v.src) + '" target="_blank" rel="noopener noreferrer" class="bg-[#da9d3c] text-[#0f2a44] font-bold text-xs px-4 py-2 rounded">Ouvrir la vidéo ↗</a></div>';
+      } else {
+        player = '<iframe class="absolute inset-0 w-full h-full" src="' + esc(v.src) + '" title="' + esc(titre) + '" frameborder="0" allowfullscreen ' +
+          'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin"></iframe>';
+      }
+      body.innerHTML = '<div class="space-y-4"><div class="rounded-xl overflow-hidden bg-black shadow-md"><div class="relative w-full aspect-video">' + player + '</div></div>' +
+        '<div class="bg-gray-100 p-4 rounded-xl"><span class="text-[10px] uppercase tracking-widest text-[#da9d3c] font-bold">Chaîne officielle</span>' +
+        '<p class="text-[11px] text-[#333333] mt-1">Retrouvez toutes les vidéos de la communauté <strong>TechnoLAB-ISTA</strong> sur notre chaîne YouTube.</p>' +
+        '<a href="https://www.youtube.com/@technolabista" target="_blank" rel="noopener noreferrer" class="inline-block mt-3 bg-[#0f2a44] text-white hover:bg-[#da9d3c] hover:text-[#0f2a44] font-bold text-xs px-4 py-2 rounded transition">▶ @technolabista</a></div></div>';
+      modal.classList.add('flex');
+      modal.classList.remove('hidden');
+    };
+    // arrêt de la lecture à la fermeture
+    var closeBtn = document.querySelector('#info-modal [onclick*="info-modal"]');
+    if (closeBtn && !closeBtn.getAttribute('data-ista-stop')) {
+      closeBtn.setAttribute('data-ista-stop', '1');
+      closeBtn.addEventListener('click', function () {
+        var b2 = document.getElementById('info-modal-body');
+        if (b2) setTimeout(function () { b2.innerHTML = ''; }, 200);
+      });
+    }
+  };
+  A.installVideoModal();
+
+  /* quel est le libellé de la vidéo demandée ? */
+  A.whichVideo = function (raw) {
+    var s = String(raw || '');
+    var found = null;
+    (A.state.videos || []).forEach(function (v) {
+      if (!v || !v.title) return;
+      if (v.url && v.url === s) found = v.title;
+      else if (v.videoId && (v.videoId === s || s.indexOf(String(v.videoId)) >= 0)) found = v.title;
+    });
+    if (found) return found;
+    var lib = { jVo76IbIFec: "Palme de l'Université la Plus Dynamique du Mali", EBR_WcMNStc: "L'hymne de TechnoLAB-ISTA" };
+    return lib[s] || '';
+  };
+
+  /* vidéo lue depuis un lien : le lecteur utilise le lien fourni */
+  function videoLink(v) {
+    var m = A.videoSrc((v || {}).url || (v || {}).videoId || '');
+    return m ? m.src : '';
   }
 
-  /* après enregistrement, on force la liste des vidéos à se réafficher avec les liens */
+  /* après enregistrement, la liste des vidéos est réaffichée avec les nouveaux liens */
   if (typeof A.renderVideos === 'function') {
     var _renderVideos = A.renderVideos;
     A.renderVideos = function () {
       (A.state.videos || []).forEach(function (v) {
-        if (v.url && !v.videoId) {
-          var id = ytId(v.url);
-          if (id && id.indexOf('vimeo:') !== 0) v.videoId = id;
-        }
+        if (!v.url && v.videoId) v.url = 'https://www.youtube.com/watch?v=' + v.videoId;
+        var id = ytId(v.url || v.videoId || '');
+        if (id && id.indexOf('vimeo:') !== 0) v.videoId = id;
       });
-      return _renderVideos.apply(null, arguments);
+      var out = _renderVideos.apply(null, arguments);
+      try {
+        (A.state.videos || []).forEach(function (v) {
+          if (v.videoId) VIDEO_TITLES[v.videoId] = v.title || '';
+        });
+        // les cartes régénérées pointent sur le lien réellement saisi
+        [].forEach.call(document.querySelectorAll('#ista-cms-videos [onclick*="openVideoModal"]'), function (el, i) {
+          var v = (A.state.videos || [])[i];
+          if (!v) return;
+          var ref = v.url || v.videoId || '';
+          el.setAttribute('onclick', "openVideoModal('" + String(ref).replace(/'/g, "\\'") + "')");
+          el.setAttribute('onkeydown', "if(event.key==='Enter'||event.key===' '){event.preventDefault();openVideoModal('" + String(ref).replace(/'/g, "\\'") + "');}");
+        });
+      } catch (e) {}
+      return out;
     };
   }
+
   A.videoLink = videoLink;
 
   /* ------------------------------------------------------------- actions UI */
@@ -6820,6 +7077,8 @@
 
   var EXPORTS = {
     pickPage: function (pid) { A.collectSections(); A.activePage = pid; A.renderAdmin(); },
+    goSite: function (pid) { A.goSite(pid); },
+    goPage: function (pid) { A.goSite(pid); },
     toggleSection: toggleSection_impl,
     moveSection: moveSection_impl,
     toggleSource: toggleSource_impl,
@@ -6836,6 +7095,16 @@
     if (!UI) { setTimeout(attachExports, 30); return; }
     Object.keys(EXPORTS).forEach(function (k) { UI[k] = EXPORTS[k]; });
     A.UI = UI;
+    try {
+      if (typeof A.renderAdmin === 'function') {
+        var _renderAdmin = A.renderAdmin;
+        A.renderAdmin = function () {
+          var out = _renderAdmin.apply(null, arguments);
+          setTimeout(mountPageBar, 0);
+          return out;
+        };
+      }
+    } catch (e) {}
   }
   attachExports();
 
