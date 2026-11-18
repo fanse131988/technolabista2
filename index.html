@@ -6040,10 +6040,10 @@
       W.addEventListener('hashchange', function () { A.route(); });
       A.route();
       // contenu partagé : si une API est configurée, on récupère la version publiée
-      if (A.online()) {
-        A.pullFromServer().then(function (r) {
+      if (A.sitePub) {
+        (A.loadPublished ? A.loadPublished() : A.pullFromServer()).then(function (r) {
           var fin = function () { A.render(A.state); if (document.getElementById('admin-root')) A.renderAdmin(); };
-          if (!A.sitePub) return fin();
+          if (!A.sitePub || (r && r.ok)) return fin();
           var vus = (A.state.site && A.state.site.version) || 0;
           A.apiGet('/api/site').then(function (j) {
             var d = j && j.data;
@@ -6497,6 +6497,64 @@
     document.documentElement.setAttribute('data-ista-cms-dirty', '0');
     if (!ok) A.toast('Stockage du navigateur saturé : utilisez « Sauvegarde » pour exporter', 'err');
     return ok;
+  };
+
+  /* --------------------------------------- publication sans serveur (content.json)
+     Sur un hébergement statique (Netlify, GitHub Pages…), il n'y a pas d'API :
+     le contenu publié est alors un fichier `content.json` déposé à côté de
+     index.html. La console sait le produire, et le site le charge au démarrage. */
+  A.staticContentURL = 'content.json';
+  A.staticVersion = 0;
+
+  A.publishFile = function () {
+    var payload;
+    try { payload = A.buildSitePayload(); } catch (e) { payload = { site: A.state.site, media: {} }; }
+    var copy = {};
+    Object.keys(A.state).forEach(function (k) {
+      if (k === 'site' || k === 'media') return;
+      copy[k] = A.state[k];
+    });
+    copy.site = payload.site;
+    copy.media = payload.media;
+    copy.version = (A.staticVersion || 0) + 1;
+    copy.publishedAt = new Date().toISOString();
+    copy.publishedBy = (A.currentUser() || {}).login || 'admin';
+    var blob = new Blob([JSON.stringify(copy)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'content.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    A.log((A.currentUser() || {}).login, 'Export du contenu publié (content.json)');
+    A.toast('content.json téléchargé — déposez-le sur GitHub pour publier pour tous');
+    return copy;
+  };
+
+  /* chargement du contenu publié (serveur ou fichier statique) */
+  A.loadPublished = function () {
+    var tryStatic = function () {
+      return window.fetch(A.staticContentURL + '?v=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || (!j.site && !j.pages)) return { ok: false, msg: 'Aucun contenu publié.' };
+          var local = 0;
+          try { local = (JSON.parse(LS.getItem('ista-cms-data') || '{}').version || 0); } catch (e) { local = 0; }
+          if ((j.version || 0) <= local) return { ok: false, msg: 'Contenu déjà à jour.' };
+          A.state = A.mergeDeep(A.seed(), j);
+          A.state.media = j.media || A.state.media || {};
+          A.state.version = j.version || 1;
+          A.staticVersion = j.version || 1;
+          A.absorbPulled();
+          A.persistLocal();
+          return { ok: true, msg: 'Contenu publié chargé (v' + (j.version || 1) + ')' };
+        })
+        .catch(function () { return { ok: false, msg: 'Aucun contenu publié.' }; });
+    };
+    if (A.online()) {
+      return A.pullFromServer().then(function (r) { return r.ok ? r : tryStatic(); });
+    }
+    return tryStatic();
   };
 
   /* ------------------------------------------------ export compact de l'état
@@ -7062,6 +7120,25 @@
     }, true);
   }
 
+  /* bouton de publication statique dans l'onglet Maintenance */
+  function mountPublishButton() {
+    var main = document.querySelector('.cms-main');
+    if (!main || document.getElementById('cms-publish-box')) return;
+    if ((A.activeTab || '') !== 'maintenance' && !/Maintenance/i.test((document.querySelector('.cms-tabs .is-active') || {}).textContent || '')) return;
+    var box = document.createElement('div');
+    box.id = 'cms-publish-box';
+    box.className = 'cms-block';
+    box.innerHTML = '<h3>Publier pour tous les visiteurs</h3>' +
+      '<p class="cms-muted">Sur un hébergement sans serveur (Netlify, GitHub Pages), le contenu publié est le fichier <code>content.json</code> placé à côté de <code>index.html</code>.</p>' +
+      '<ol class="cms-hint" style="margin:.4rem 0 .6rem 1.1rem;line-height:1.7">' +
+      '<li><strong>Publier pour tous</strong> télécharge <code>content.json</code> avec vos modifications.</li>' +
+      '<li>Sur GitHub : <em>Add file → Upload files</em>, déposez ce fichier à la racine (à côté de index.html), puis <em>Commit changes</em>.</li>' +
+      '<li>Netlify / GitHub Pages republie automatiquement le site : tous les visiteurs voient la mise à jour.</li></ol>' +
+      '<div class="cms-actions"><button class="cms-btn cms-btn-primary" onclick="IstaAdminUI.publishFile()">⭳ Publier pour tous (content.json)</button>' +
+      '<button class="cms-btn" onclick="IstaAdminUI.loadPublished()">⟳ Charger le contenu publié</button></div>';
+    main.appendChild(box);
+  }
+
   /* la console est reconstruite à chaque rendu : on applique les finitions à chaque fois */
   function afterConsoleRender() {
     mountPageBar();
@@ -7070,6 +7147,7 @@
       fixPreviewContrast(b);
     });
     bindPreviewClicks();
+    mountPublishButton();
   }
   function watchConsole() {
     var root = document.getElementById('admin-root');
@@ -7295,6 +7373,10 @@
 
   var EXPORTS = {
     pickPage: function (pid) { A.collectSections(); A.activePage = pid; A.renderAdmin(); },
+    publishFile: function () { A.publishFile(); },
+    loadPublished: function () {
+      A.loadPublished().then(function (r) { A.render(A.state); A.renderAdmin(); A.toast(r.msg, r.ok ? 'ok' : 'err'); });
+    },
     goSite: function (pid) { A.goSite(pid); },
     goPage: function (pid) { A.goSite(pid); },
     toggleSection: toggleSection_impl,

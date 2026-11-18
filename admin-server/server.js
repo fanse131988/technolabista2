@@ -158,9 +158,7 @@ const server = http.createServer(async (req, res) => {
   // --- contenu publié (lecture publique, écriture authentifiée)
   if (p === '/api/content') {
     if (req.method === 'GET') {
-      const data = readJson(F_CONTENT, {});
-      delete data.site; delete data.media; delete data.saved; delete data.__patch;
-      return json(res, 200, { data: data });
+      return json(res, 200, { data: readJson(F_CONTENT, {}) });
     }
     const s = authUser(req);
     if (!s) return json(res, 401, { error: 'Authentification requise.' });
