@@ -6461,6 +6461,7 @@
       A.state.site = JSON.parse(JSON.stringify(A.seedSite));
     }
     if (!Object.keys(A.seedSite).length) A.seedSite = JSON.parse(JSON.stringify(A.state.site));
+    A.attachToJSON();
   };
 
   /* ------------------------------------------------ enregistrement local compact
@@ -6496,6 +6497,51 @@
     document.documentElement.setAttribute('data-ista-cms-dirty', '0');
     if (!ok) A.toast('Stockage du navigateur saturé : utilisez « Sauvegarde » pour exporter', 'err');
     return ok;
+  };
+
+  /* ------------------------------------------------ export compact de l'état
+     L'enregistrement envoie A.state : on l'exporte sous forme compacte (rubriques
+     en écarts + images référencées) pour que même un serveur ancien, qui ne connaît
+     que /api/content, publie les modifications de pages. */
+  A.attachToJSON = function () {
+    if (!A.state || Object.getOwnPropertyDescriptor(A.state, 'toJSON')) return;
+    Object.defineProperty(A.state, 'toJSON', {
+      configurable: true, enumerable: false,
+      value: function () {
+        var copy = {}, st = A.state;
+        Object.keys(st).forEach(function (k) {
+          if (k === 'site' || k === 'media' || k === 'saved') return;
+          copy[k] = st[k];
+        });
+        try {
+          var c = A.compactSite();
+          copy.site = c.site;
+          copy.media = c.media;
+        } catch (e) {
+          copy.site = st.site;
+          copy.media = st.media || {};
+        }
+        return copy;
+      }
+    });
+  };
+
+  /* après une synchronisation descendue du serveur : on reconstruit les rubriques */
+  A.absorbPulled = function () {
+    var site = A.state.site;
+    if (!site) return false;
+    if (site.__patch) {
+      if (!A.seedSite) A.seedSite = A.snapshotDom();
+      if (!A._imgMap) A.mapFromSite();
+      A.state.media = A.state.media || {};
+      var ver = site.version || 0;
+      var expanded = A.expandSite(site, A.state.media);
+      if (ver) expanded.version = ver;
+      A.state.site = expanded;
+    }
+    if (!Object.keys(A.seedSite || {}).length) A.seedSite = JSON.parse(JSON.stringify(A.state.site));
+    A.attachToJSON();
+    return true;
   };
 
   /* ------------------------------------------ synchronisation des rubriques (serveur) */
@@ -6565,6 +6611,7 @@
     var _pullAll = A.pullFromServer;
     A.pullFromServer = function () {
       return _pullAll.apply(null, arguments).then(function (r) {
+        try { A.absorbPulled(); } catch (e) {}
         try { if (!A.state.site || !Object.keys(A.state.site).length) A.ensureSections(); } catch (e) {}
         return r;
       });
