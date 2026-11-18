@@ -340,6 +340,22 @@
     .cms-main .cms-section { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; margin-bottom: 1rem;
       overflow: hidden; position: relative; z-index: 0; isolation: isolate; }
     .cms-secbody { position: relative; z-index: 0; isolation: isolate; transform: translateZ(0); contain: paint; }
+    /* dans l'aperçu, aucun texte ne doit rester invisible (animations d'apparition,
+       dégradés, opacités) : on neutralise les effets pour pouvoir tout corriger */
+    .cms-secbody, .cms-secbody * { opacity: 1 !important; visibility: visible !important;
+      filter: none !important; mix-blend-mode: normal !important; transform: none !important;
+      animation: none !important; transition: none !important; }
+    /* les calques de lisibilité (dégradés sombres posés sur les photos) contiennent
+       souvent du texte : on les remet dans le flux, sur fond clair, avec une encre
+       sombre — le texte devient lisible ET modifiable au lieu d'être masqué */
+    .cms-secbody [class*="gradient"], .cms-secbody [class*="from-black"], .cms-secbody [class*="from-["] {
+      background-image: none !important; background-color: #edf1f6 !important;
+      position: static !important; inset: auto !important; opacity: 1 !important;
+      padding: .5rem .7rem !important; border-radius: 6px; }
+    .cms-secbody [class*="gradient"] *, .cms-secbody [class*="from-black"] * {
+      color: #14263a !important; text-shadow: none !important; }
+    /* rubrique dépliée : les contenus repliés (accordéons, onglets) s'affichent */
+    .cms-secbody.cms-expanded .hidden, .cms-secbody.cms-expanded [class*="hidden"] { display: revert !important; }
     .cms-secbody .cms-visual, .cms-secbody > * { max-width: 100%; }
     .cms-secbody [style*="fixed"], .cms-secbody .fixed, .cms-secbody .sticky { position: absolute !important; }
     .cms-head, .cms-tabs { position: relative; z-index: 5; }
@@ -349,6 +365,10 @@
     .cms-secactions { display: flex; gap: .3rem; flex-wrap: wrap; }
     .cms-secbody { padding: 1rem; max-height: 420px; overflow: auto; }
     .cms-secbody .cms-editable { outline: 1px dashed rgba(218,157,60,.7); outline-offset: 2px; border-radius: 3px; cursor: text; }
+    .cms-secbody .cms-editable.cms-ink-dark { color: #14263a !important; background: rgba(255,255,255,.9);
+      box-shadow: 0 0 0 1px rgba(218,157,60,.55); border-radius: 3px; text-shadow: none !important; }
+    .cms-secbody .cms-editable.cms-ink-light { color: #ffffff !important; background: rgba(15,42,68,.88);
+      box-shadow: 0 0 0 1px rgba(218,157,60,.75); border-radius: 3px; text-shadow: none !important; }
     .cms-secbody .cms-editable:hover, .cms-secbody .cms-editable:focus { outline: 2px solid #da9d3c; background: rgba(218,157,60,.08); }
     .cms-secbody img { max-height: 160px; width: auto; }
     .cms-secbody h1 { font-size: 26px; font-weight: 700; }
@@ -6613,6 +6633,58 @@
     A.toast('Retour au site — bouton « ⚙ Console » pour revenir');
   };
 
+  /* ------------------------------------------ animations neutralisées dans l'aperçu
+     Les effets du site (apparition au défilement, parallaxe, compteurs) rendaient
+     certains textes invisibles dans l'éditeur : ils sont désactivés pour les
+     éléments d'aperçu, sans toucher au site public. */
+  function stopEffects(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    [].forEach.call(scope.querySelectorAll('[class*="ista-reveal"], [class*="ista-parallax"], [class*="ista-count"]'), function (el) {
+      el.classList.remove('ista-reveal', 'is-visible', 'ista-parallax', 'ista-count');
+      el.style.opacity = '';
+      el.style.transform = '';
+      el.style.visibility = '';
+    });
+  }
+  /* lisibilité garantie : un texte clair sur fond clair (ou l'inverse) reçoit une
+     pastille de contraste dans l'aperçu — il reste modifiable et visible */
+  function lum(color) {
+    var m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(color || '');
+    if (!m) return 1;
+    var c = [+m[1], +m[2], +m[3]].map(function (v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function fixPreviewContrast(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    [].forEach.call(scope.querySelectorAll('.cms-editable'), function (sp) {
+      var fg = lum(getComputedStyle(sp).color);
+      var bg = null, el = sp.parentElement;
+      while (el && el !== document.body) {
+        var c = getComputedStyle(el).backgroundColor;
+        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') { bg = lum(c); break; }
+        el = el.parentElement;
+      }
+      if (bg === null) bg = 0.95;                       // pas de fond : page claire
+      var diff = Math.abs(fg - bg);
+      sp.classList.remove('cms-ink-dark', 'cms-ink-light');
+      if (diff < 0.4) sp.classList.add(bg > 0.5 ? 'cms-ink-dark' : 'cms-ink-light');
+    });
+  }
+
+  if (typeof window.istaObserveReveal === 'function') {
+    var _reveal = window.istaObserveReveal;
+    window.istaObserveReveal = function (scope) {
+      stopEffects(scope);
+      return _reveal.apply(null, arguments);
+    };
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    [].forEach.call(document.querySelectorAll('.cms-secbody'), function (body) { stopEffects(body); });
+  }, { once: true });
+
   /* ------------------------------------------------------- aperçu éditable */
   function editorBody(html, pid, si) {
     var wrap = document.createElement('div');
@@ -6654,6 +6726,7 @@
       '<button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.moveSection(\'' + pid + '\',' + si + ',1)" title="Descendre">↓</button>' +
       '<button class="cms-btn cms-btn-sm' + (sec.hidden ? ' cms-btn-danger' : '') + '" onclick="IstaAdminUI.toggleSection(\'' + pid + '\',' + si + ')">' + (sec.hidden ? 'Masquée' : 'Visible') + '</button>' +
       '<button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.toggleSource(\'' + pid + '\',' + si + ')">&lt;/&gt; HTML</button>' +
+      '<button class="cms-btn cms-btn-sm" onclick="IstaAdminUI.expandSection(\'' + pid + '\',' + si + ')">Tout afficher</button>' +
       '</span></div>' +
       '<div class="cms-secbody cms-visual" id="cms-vis-' + pid + '-' + si + '">' + ed.body + '</div>' +
       ed.imgs +
@@ -6868,6 +6941,16 @@
   }
 
   A.videoLink = videoLink;
+
+  function expandSection_impl(pid, si) {
+    var vis = document.getElementById('cms-vis-' + pid + '-' + si);
+    if (!vis) return;
+    var open = !vis.classList.contains('cms-expanded');
+    vis.classList.toggle('cms-expanded', open);
+    stopEffects(vis);
+    fixPreviewContrast(vis);
+    A.toast(open ? 'Rubrique dépliée : tous les textes sont affichés' : 'Affichage normal rétabli');
+  }
 
   /* ------------------------------------------------------------- actions UI */
   function toggleSection_impl(pid, si) {
@@ -7088,7 +7171,8 @@
     addVideo: addVideo_impl,
     saveName: saveName_impl,
     changePass2: changePass2_impl,
-    reloadSections: reloadSections_impl
+    reloadSections: reloadSections_impl,
+    expandSection: expandSection_impl
   };
   function attachExports() {
     var UI = window.IstaAdminUI;
@@ -7100,7 +7184,10 @@
         var _renderAdmin = A.renderAdmin;
         A.renderAdmin = function () {
           var out = _renderAdmin.apply(null, arguments);
-          setTimeout(mountPageBar, 0);
+          setTimeout(function () {
+            mountPageBar();
+            [].forEach.call(document.querySelectorAll('.cms-secbody'), function (b) { stopEffects(b); fixPreviewContrast(b); });
+          }, 0);
           return out;
         };
       }
